@@ -73,7 +73,6 @@ func (r *rpcStream) Send(msg interface{}) error {
 }
 
 func (r *rpcStream) Recv(msg interface{}) error {
-
 	err := func() error {
 		r.Lock()
 		defer r.Unlock()
@@ -109,6 +108,7 @@ func (r *rpcStream) Recv(msg interface{}) error {
 			} else {
 				r.err = io.EOF
 			}
+			msg = nil
 		}
 		return nil
 	}()
@@ -116,7 +116,7 @@ func (r *rpcStream) Recv(msg interface{}) error {
 		return err
 	}
 
-	err = r.codec.ReadBody(nil)
+	err = r.codec.ReadBody(msg)
 
 	return func() error {
 		r.Lock()
@@ -126,7 +126,6 @@ func (r *rpcStream) Recv(msg interface{}) error {
 			r.err = err
 		}
 		return r.err
-
 	}()
 }
 
