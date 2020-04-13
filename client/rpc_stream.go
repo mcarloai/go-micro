@@ -73,54 +73,61 @@ func (r *rpcStream) Send(msg interface{}) error {
 }
 
 func (r *rpcStream) Recv(msg interface{}) error {
-	r.Lock()
-	defer r.Unlock()
 
-	if r.isClosed() {
-		r.err = errShutdown
-		return errShutdown
-	}
+	err := func() error {
+		r.Lock()
+		defer r.Unlock()
 
-	var resp codec.Message
-
-	r.Unlock()
-	err := r.codec.ReadHeader(&resp, codec.Response)
-	r.Lock()
-	if err != nil {
-		if err == io.EOF && !r.isClosed() {
-			r.err = io.ErrUnexpectedEOF
-			return io.ErrUnexpectedEOF
+		if r.isClosed() {
+			r.err = errShutdown
+			return errShutdown
 		}
-		r.err = err
+		return nil
+	}()
+	if err != nil {
 		return err
 	}
 
-	switch {
-	case len(resp.Error) > 0:
-		// We've got an error response. Give this to the request;
-		// any subsequent requests will get the ReadResponseBody
-		// error if there is one.
-		if resp.Error != lastStreamResponseError {
-			r.err = serverError(resp.Error)
-		} else {
-			r.err = io.EOF
-		}
-		r.Unlock()
-		err = r.codec.ReadBody(nil)
+	var resp codec.Message
+	err = r.codec.ReadHeader(&resp, codec.Response)
+
+	err = func() error {
 		r.Lock()
+		defer r.Unlock()
 		if err != nil {
+			if err == io.EOF && !r.isClosed() {
+				r.err = io.ErrUnexpectedEOF
+				return io.ErrUnexpectedEOF
+			}
 			r.err = err
+			return err
 		}
-	default:
-		r.Unlock()
-		err = r.codec.ReadBody(msg)
-		r.Lock()
-		if err != nil {
-			r.err = err
+
+		if len(resp.Error) > 0 {
+			if resp.Error != lastStreamResponseError {
+				r.err = serverError(resp.Error)
+			} else {
+				r.err = io.EOF
+			}
 		}
+		return nil
+	}()
+	if err != nil {
+		return err
 	}
 
-	return r.err
+	err = r.codec.ReadBody(nil)
+
+	return func() error {
+		r.Lock()
+		defer r.Unlock()
+
+		if err != nil {
+			r.err = err
+		}
+		return r.err
+
+	}()
 }
 
 func (r *rpcStream) Error() error {
